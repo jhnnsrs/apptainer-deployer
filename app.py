@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import AsyncGenerator, Dict
 import xarray as xr
 import numpy as np
+import uuid
 # from docker import DockerClient, from_env
 # import spython.main as SingularityClient
 import subprocess, json
@@ -25,6 +26,7 @@ from kabinet.api.schema import (
     create_pod,
     delete_pod,
 )
+from fakts import get_current_fakts()
 from mikro_next.api.schema import Image, from_array_like
 from rekuest_next.actors.reactive.api import (
     progress,
@@ -58,6 +60,7 @@ class ArkitektContext:
     instance_id: str
     gateway: str = field(default=ARKITEKT_GATEWAY)
     network: str = field(default=ARKITEKT_NETWORK)
+    furz: str = 2333
 
 
 @startup
@@ -65,7 +68,9 @@ async def on_startup(instance_id) -> ArkitektContext:
     print("Starting up on_startup", instance_id)
     print("Check sfosr scontainers that are no longer pods?")
 
-    x = await adeclare_backend(instance_id=instance_id, name="::", kind="apptainer")
+    x = await adeclare_backend(instance_id=instance_id, name="Apptainer Deployer", kind="apptainer")
+
+    caddy_url = await get_current_fakts().aget("lok.endpoint_url")
 
     return ArkitektContext(
         docker=None,
@@ -87,6 +92,7 @@ async def container_checker(context: ArkitektContext):
         apptainer_instance_list = subprocess.run(["apptainer", "instance", "list", "--json"], text=True, capture_output=True)
         containers = json.loads(apptainer_instance_list.stdout)
         for container in containers["instances"]:
+            if not container["instance"].startswith("MEEEE"): continue
             try:
                 old_status = pod_status.get(container["instance"], None)
                 print("Pod Status: ",old_status)
@@ -135,9 +141,11 @@ def run(deployment: Deployment, context: ArkitektContext) -> Pod:
     # )
     container_name = "random-name"
     process = subprocess.run(
-        ["apptainer", "instance", "start", "--writable-tmpfs", "docker://jhnnsrs/renderer:0.0.1-vanilla", container_name],
+        ["apptainer", "instance", "start", "--writable-tmpfs", flavour.image, container_name],
         text=True,
     )
+
+    x = get_current_fakts().get("lok.endpoint_url")
 
     test = useInstanceID()
     print(test)
@@ -162,8 +170,18 @@ def restart(pod: Pod, context: ArkitektContext) -> Pod:
     """
 
     print("\tRunning\n")
-    container = context.docker.containers.get(pod.pod_id)
+    container_name = pod.local_id
 
+
+    subprocess.run(["apptainer", "instance", "stop", container_name])
+    # start again
+
+    #// pod.deployment.flavour.image
+    process = subprocess.run(
+        ["apptainer", "instance", "start", pod.deployment.flavour.image or "docker://jhnnsrs/renderer:0.0.1-vanilla", container_name],
+        text=True,
+    )
+    
     progress(50)
     container.restart()
     progress(100)
@@ -239,7 +257,7 @@ def deploy(release: Release, context: ArkitektContext) -> Pod:
     )
 
     process = subprocess.run(
-        ["apptainer", "instance", "start", "docker://jhnnsrs/renderer:0.0.1-vanilla", container_name],
+        ["apptainer", "instance", "start", flavour.image or "docker://jhnnsrs/renderer:0.0.1-vanilla", container_name],
         text=True,
     )
 
@@ -258,8 +276,14 @@ def deploy(release: Release, context: ArkitektContext) -> Pod:
 
     # COnver step here for apptainer
 
+    container_name = "MEEEEE" + str(uuid.uuid4())
+
+    z = create_pod(
+        deployment=deployment, instance_id=useInstanceID(), local_id=container_name
+    )
+
     print("Running the command")
-    with open("apptainer.log", "w") as f:
+    with open(f"apptainer{z.id}.log", "w") as f:
         process = subprocess.run(
             ["apptainer", "exec", "--pwd", "/app", "instance://"+container_name, "arkitekt-next", "run", "dev", "--url", "arkitekt.compeng.uni-frankfurt.de"],
             # ["apptainer", "instance", "run", "--pwd", "/app", "--writable-tmpf", "docker://jhnnsrs/renderer:0.0.1-vanilla", container_name, "arkitekt-next", "run", "dev", "--url", "arkitekt.compeng.uni-frankfurt.de"],
@@ -272,11 +296,6 @@ def deploy(release: Release, context: ArkitektContext) -> Pod:
 
     progress(90)
 
-    context.docker = container_name
-
-    z = create_pod(
-        deployment=deployment, instance_id=useInstanceID(), local_id=container_name
-    )
 
     print("Pod Created during Deploy: ",z)
 
